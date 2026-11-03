@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { loadSubagentAPI, registerChildMode } from "./src/subagents.ts";
 
 const WRITE_TOOLS = new Set(["edit", "write"]);
 const STATE_ENTRY = "ro-rw-mode-state";
@@ -9,21 +8,16 @@ type Mode = "ro" | "rw";
 
 interface PersistedState {
   mode: Mode;
+  hiddenWrites?: string[];
 }
 
 export default function roRwModeExtension(pi: ExtensionAPI): void {
-  if (process.env.PI_SUBAGENT_CHILD === "1") return;
   let mode: Mode = "rw";
-  let toolsBeforeRo: string[] | undefined;
+  let hiddenWrites: string[] = [];
   let requestFooterRender: (() => void) | undefined;
-  let subagentAPI: Awaited<ReturnType<typeof loadSubagentAPI>>;
-  let childModeRegistration: { dispose(): void } | undefined;
-
-  const syncChildMode = (ctx: ExtensionContext) => {
-    childModeRegistration?.dispose();
-    childModeRegistration = undefined;
-    if (subagentAPI) childModeRegistration = registerChildMode(subagentAPI, ctx.sessionManager.getSessionId(), mode);
-  };
+  const unsubscribeMode = pi.events.on("ro-rw-mode:get", (request) => {
+    if (request && typeof request === "object") (request as { mode?: Mode }).mode = mode;
+  });
 
   const setStatus = (ctx: ExtensionContext) => {
     ctx.ui.setStatus("ro-rw-mode", undefined);
@@ -90,24 +84,19 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
     });
   };
 
-  const persist = () => pi.appendEntry<PersistedState>(STATE_ENTRY, { mode });
+  const persist = () => pi.appendEntry<PersistedState>(STATE_ENTRY, { mode, hiddenWrites });
 
   const applyMode = (ctx: ExtensionContext, nextMode: Mode, announce = true) => {
-    if (mode === nextMode && toolsBeforeRo !== undefined) {
-      setStatus(ctx);
-      return;
-    }
-
+    if (mode === nextMode) return;
+    const active = pi.getActiveTools();
     if (nextMode === "ro") {
-      if (mode !== "ro") toolsBeforeRo = pi.getActiveTools();
-      pi.setActiveTools((toolsBeforeRo ?? pi.getActiveTools()).filter((name) => !WRITE_TOOLS.has(name)));
+      hiddenWrites = active.filter((name) => WRITE_TOOLS.has(name));
+      pi.setActiveTools(active.filter((name) => !WRITE_TOOLS.has(name)));
     } else {
-      pi.setActiveTools(toolsBeforeRo ?? pi.getActiveTools());
-      toolsBeforeRo = undefined;
+      pi.setActiveTools([...new Set([...active, ...hiddenWrites])]);
+      hiddenWrites = [];
     }
-
     mode = nextMode;
-    syncChildMode(ctx);
     setStatus(ctx);
     persist();
 
@@ -144,42 +133,35 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
     handler: toggle,
   });
 
-  pi.on("before_agent_start", async () => {
-    return {
-      message: {
-        customType: "ro-rw-mode-context",
-        content:
-          mode === "ro"
-            ? "[RO MODE ACTIVE] You are in read-only mode. Do not use edit or write tools, and do not modify files or other state through bash or scripts. Perform only read-only inspection and analysis. If a change is needed, ask the user to switch to RW mode."
-            : "[RW MODE ACTIVE] You are in read/write mode. Use the available tools as needed to complete the user's request.",
-        display: false,
-      },
-    };
-  });
+  pi.on("context", (event) => ({
+    messages: event.messages.filter((message) => !(message.role === "custom" &&
+      ["ro-rw-mode", "ro-rw-mode-context"].includes(message.customType))),
+  }));
+  pi.on("before_agent_start", (event) => ({
+    systemPrompt: event.systemPrompt + "\n\n" + (mode === "ro"
+      ? "[RO MODE ACTIVE] Only inspect and analyze. Do not modify files or other state, including through bash or scripts. If changes are needed, tell the user to switch to RW."
+      : "[RW MODE ACTIVE] Use the available tools to complete the user's request. Earlier RO instructions from this mode plugin no longer apply."),
+  }));
 
   pi.on("session_start", async (_event, ctx) => {
-    // Background children can discover ambient extensions. Their dedicated child
-    // extension owns the launch snapshot; never restore a parent's UI/state here.
-    if (process.env.PI_SUBAGENT_CHILD === "1") return;
-    subagentAPI = await loadSubagentAPI();
     installFooter(ctx);
-    const entries = ctx.sessionManager.getEntries();
+    const entries = ctx.sessionManager.getBranch();
     const saved = [...entries]
       .reverse()
       .find((entry) => entry.type === "custom" && entry.customType === STATE_ENTRY) as
       | { data?: PersistedState }
       | undefined;
-    if (saved?.data?.mode) mode = saved.data.mode;
+    mode = saved?.data?.mode ?? "rw";
+    hiddenWrites = saved?.data?.hiddenWrites?.filter((name) => WRITE_TOOLS.has(name)) ?? [];
     if (mode === "ro") {
-      toolsBeforeRo = pi.getActiveTools();
-      pi.setActiveTools(toolsBeforeRo.filter((name) => !WRITE_TOOLS.has(name)));
+      const active = pi.getActiveTools();
+      hiddenWrites = [...new Set([...hiddenWrites, ...active.filter((name) => WRITE_TOOLS.has(name))])];
+      pi.setActiveTools(active.filter((name) => !WRITE_TOOLS.has(name)));
     }
     setStatus(ctx);
-    syncChildMode(ctx);
   });
 
   pi.on("session_shutdown", () => {
-    childModeRegistration?.dispose();
-    childModeRegistration = undefined;
+    unsubscribeMode();
   });
 }

@@ -3,7 +3,7 @@
 A small Pi coding-agent extension that provides read-only (`RO`) and read/write (`RW`) modes.
 
 - `/ro` switches to read-only mode and hides the built-in `edit` and `write` tools.
-- `/rw` restores the tool set that was active before entering RO mode.
+- `/rw` restores only the write tools hidden by RO, preserving tools added by other extensions.
 - `/mode` toggles between the two modes.
 - The current mode is shown immediately after the model name and thinking effort in a custom TUI footer, and is included in the model context.
 - The custom footer retains directory, branch, usage, context and other extension statuses. Other extensions that replace the footer may override this layout.
@@ -14,7 +14,7 @@ Footer usage labels: `UP` (input tokens), `DN` (output tokens), `CR` (cache read
 
 ## Install
 
-Install the complete directory as a local Pi package (the `src/` files are required):
+Install the complete directory as a local Pi package:
 
 ```sh
 pi install /absolute/path/to/pi_ro_rw_mode
@@ -28,22 +28,16 @@ pi -e /absolute/path/to/pi_ro_rw_mode/index.ts
 
 Use `/ro`, `/rw`, or `/mode` inside Pi. Use `/reload` after changing the extension.
 
-## Subagents
+## Light subagents
 
-Integrates with `nicobailon/pi-subagents` through its public `required-child-extensions` API. It resolves an installed package first, or a sibling `../pi-subagents` source checkout. The tested upstream checkout is version 0.84.0. Older releases without this API are not supported.
+This plugin does not depend on a subagent package. Extensions can query the current session's mode synchronously using Pi's session event bus:
 
-At launch, a local native Pi child receives an immutable RO or RW extension. RO hides `edit`/`write` and appends read-only system guidance on each agent start; bash remains available and follows that guidance. RW preserves the child's configured tools. Nested/background children inherit the extension snapshot. The main UI extension does not initialize inside background children.
-
-Changing the parent mode affects new launches only. Steering an existing child or resuming its retained session keeps the original mode; launch a fresh child to use a different mode. The upstream resume contract retains its original required-extension snapshot, so per-follow-up permission changes are not implemented. External CLI and remote runners cannot load this extension and are rejected in RO by the required-extension API; RW adds no such restriction.
-
-When `pi-subagents` is absent, ordinary RO/RW mode remains available. Do not copy only `index.ts`, or load both the old standalone file and the package directory.
-
-## Validation
-
-With a sibling upstream source checkout and the installed Pi runtime:
-
-```sh
-PI_NODE_MODULES=/path/to/pi/runtime/node_modules node test/subagents.mjs
+```ts
+const query: { mode?: "ro" | "rw" } = {};
+pi.events.emit("ro-rw-mode:get", query);
+// query.mode is now the active mode, if this extension is loaded.
 ```
 
-This checks the real upstream registration API, launch snapshot isolation, RO/RW child hooks, session separation, and cleanup without making model requests. It is not an end-to-end model delegation test.
+`pi_light_subagent` captures this mode at launch. Existing children keep their captured mode. No third-party adapter, child extension injection, or subagent runtime is included here.
+
+Write tools hidden by RO are persisted with the mode. Switching back to RW merges those tools into the current active selection instead of restoring a stale whole-tool-list snapshot. Modes are restored from the current session branch. Current-mode guidance is supplied through the system prompt; obsolete plugin reminders are filtered from model context.
