@@ -34,7 +34,7 @@ Integrates with `nicobailon/pi-subagents` through its public `required-child-ext
 
 At launch, a local native Pi child receives an immutable RO or RW extension. RO hides `edit`/`write` and appends read-only system guidance on each agent start; bash remains available and follows that guidance. RW preserves the child's configured tools. Nested/background children inherit the extension snapshot. The main UI extension does not initialize inside background children.
 
-Changing the parent mode affects new launches only. Steering an existing child or resuming its retained session keeps the original mode; launch a fresh child to use a different mode. The upstream resume contract retains its original required-extension snapshot, so per-follow-up permission changes are not implemented. External CLI and remote runners cannot load this extension and are rejected by the required-extension API.
+Changing the parent mode affects new launches only. Steering an existing child or resuming its retained session keeps the original mode; launch a fresh child to use a different mode. The upstream resume contract retains its original required-extension snapshot, so per-follow-up permission changes are not implemented. External CLI and remote runners cannot load this extension and are rejected in RO by the required-extension API; RW adds no such restriction.
 
 When `pi-subagents` is absent, ordinary RO/RW mode remains available. Do not copy only `index.ts`, or load both the old standalone file and the package directory.
 

@@ -28,6 +28,6 @@ export function registerChildMode(api: ChildExtensionAPI, sessionId: string, mod
   return api.registerRequiredChildExtensions({
     sessionId,
     extensions: [{ id: "ro-rw-mode", path: fileURLToPath(new URL(`./child-${mode}.ts`, import.meta.url)) }],
-    requireForAllRunners: true,
+    requireForAllRunners: mode === "ro",
   });
 }
