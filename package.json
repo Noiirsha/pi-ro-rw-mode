@@ -3,5 +3,16 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "pi": { "extensions": ["./index.ts"] }
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "description": "Read-only/read-write mode guidance and a compact Pi footer."
 }

@@ -1,4 +1,4 @@
-# pi_ro_rw_mode
+# pi-ro-rw-mode
 
 A small Pi coding-agent extension that provides read-only (`RO`) and read/write (`RW`) modes.
 
@@ -14,16 +14,16 @@ Footer usage labels: `UP` (input tokens), `DN` (output tokens), `CR` (cache read
 
 ## Install
 
-Install the complete directory as a local Pi package:
+Requires Pi 1.4.0+ and Node.js 22.18+ (24 recommended). Pi supplies the extension SDK dependencies; no npm install step is required. Install the complete directory as a local Pi package:
 
 ```sh
-pi install /absolute/path/to/pi_ro_rw_mode
+pi install /absolute/path/to/pi-ro-rw-mode
 ```
 
 Or load it for one run:
 
 ```sh
-pi -e /absolute/path/to/pi_ro_rw_mode/index.ts
+pi -e /absolute/path/to/pi-ro-rw-mode/index.ts
 ```
 
 Use `/ro`, `/rw`, or `/mode` inside Pi. Use `/reload` after changing the extension.
@@ -38,7 +38,7 @@ pi.events.emit("ro-rw-mode:get", query);
 // query.mode is now the active mode, if this extension is loaded.
 ```
 
-`pi_light_subagent` captures this mode at launch. Existing children keep their captured mode. No third-party adapter, child extension injection, or subagent runtime is included here.
+`pi-light-subagent` captures this mode at launch. Existing children keep their captured mode. No third-party adapter, child extension injection, or subagent runtime is included here.
 
 Only the mode is persisted. At startup/reload, branch navigation and mode commands, RO removes edit/write, while RW merges available registered edit/write into the current selection. This also repairs legacy sessions with missing or empty hiddenWrites. No historical hidden-tool snapshot is needed. Other extension tools remain unchanged. Tools absent from Pi's registry (for example because of CLI exclusions) are not enabled. RW intentionally enables registered write tools even if they were inactive. Current-mode guidance is supplied through the system prompt; obsolete plugin reminders are filtered from model context.
 
@@ -49,3 +49,17 @@ PI_NODE_MODULES=/path/to/pi/runtime/node_modules node --test test/mode.test.mjs
 ```
 
 Regression coverage includes legacy/empty hiddenWrites, RO reload, RW repair, branch navigation, preserving extension tools and respecting the available registry.
+
+## Dependencies and compatibility
+
+This is a standalone repository with no imports from sibling plugins. `pi-light-subagent` is an optional separate installation; the event-bus example above is its entire integration contract. `pi-deepseek-web-feature` and other extension tools remain active in RO unless separately restricted: this plugin only hides built-in edit/write and guides the model. It does not classify or enforce permissions for every third-party tool. `PiProviderManager` and the thinking plugin are not required.
+
+Uninstall with `pi remove /absolute/path/to/pi-ro-rw-mode`, then `/reload`. Tests require `PI_NODE_MODULES` pointing to your actual Pi runtime; without it the loader checks are skipped. The package remains `private: true` (not published to npm). Archive the whole repository for GitHub.
+
+## Repository layout
+
+- `index.ts`: mode commands, session state, prompt guidance and custom footer.
+- `test/mode.test.mjs`: real Pi loader regression tests; no model requests.
+- `package.json`: local Pi package entry and `npm test` command.
+
+The default mode for a session without saved mode state is RW. Mode is stored in Pi session entries, not a separate configuration file. Package/directory names use kebab-case; tool IDs, event names and persisted state keys are stable protocol identifiers and are not renamed.
