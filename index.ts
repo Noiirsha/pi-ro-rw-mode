@@ -8,12 +8,10 @@ type Mode = "ro" | "rw";
 
 interface PersistedState {
   mode: Mode;
-  hiddenWrites?: string[];
 }
 
 export default function roRwModeExtension(pi: ExtensionAPI): void {
   let mode: Mode = "rw";
-  let hiddenWrites: string[] = [];
   let requestFooterRender: (() => void) | undefined;
   const unsubscribeMode = pi.events.on("ro-rw-mode:get", (request) => {
     if (request && typeof request === "object") (request as { mode?: Mode }).mode = mode;
@@ -84,19 +82,21 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
     });
   };
 
-  const persist = () => pi.appendEntry<PersistedState>(STATE_ENTRY, { mode, hiddenWrites });
+  // Derive write availability from the current registry, never a historical
+  // active-tool snapshot: reload/resume can replay RO's removals into RW.
+  const reconcileTools = () => {
+    const active = pi.getActiveTools();
+    const writes = pi.getAllTools().filter(tool => WRITE_TOOLS.has(tool.name) && tool.exposure !== "hidden").map(tool => tool.name);
+    const next = mode === "ro"
+      ? active.filter(name => !WRITE_TOOLS.has(name))
+      : [...new Set([...active, ...writes])];
+    if (next.length !== active.length || next.some((name, i) => name !== active[i])) pi.setActiveTools(next);
+  };
+  const persist = () => pi.appendEntry<PersistedState>(STATE_ENTRY, { mode });
 
   const applyMode = (ctx: ExtensionContext, nextMode: Mode, announce = true) => {
-    if (mode === nextMode) return;
-    const active = pi.getActiveTools();
-    if (nextMode === "ro") {
-      hiddenWrites = active.filter((name) => WRITE_TOOLS.has(name));
-      pi.setActiveTools(active.filter((name) => !WRITE_TOOLS.has(name)));
-    } else {
-      pi.setActiveTools([...new Set([...active, ...hiddenWrites])]);
-      hiddenWrites = [];
-    }
     mode = nextMode;
+    reconcileTools();
     setStatus(ctx);
     persist();
 
@@ -143,8 +143,7 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
       : "[RW MODE ACTIVE] Use the available tools to complete the user's request. Earlier RO instructions from this mode plugin no longer apply."),
   }));
 
-  pi.on("session_start", async (_event, ctx) => {
-    installFooter(ctx);
+  const restoreMode = (ctx: ExtensionContext) => {
     const entries = ctx.sessionManager.getBranch();
     const saved = [...entries]
       .reverse()
@@ -152,14 +151,14 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
       | { data?: PersistedState }
       | undefined;
     mode = saved?.data?.mode ?? "rw";
-    hiddenWrites = saved?.data?.hiddenWrites?.filter((name) => WRITE_TOOLS.has(name)) ?? [];
-    if (mode === "ro") {
-      const active = pi.getActiveTools();
-      hiddenWrites = [...new Set([...hiddenWrites, ...active.filter((name) => WRITE_TOOLS.has(name))])];
-      pi.setActiveTools(active.filter((name) => !WRITE_TOOLS.has(name)));
-    }
+    reconcileTools();
     setStatus(ctx);
+  };
+  pi.on("session_start", (_event, ctx) => {
+    installFooter(ctx);
+    restoreMode(ctx);
   });
+  pi.on("session_tree", (_event, ctx) => restoreMode(ctx));
 
   pi.on("session_shutdown", () => {
     unsubscribeMode();

@@ -3,7 +3,7 @@
 A small Pi coding-agent extension that provides read-only (`RO`) and read/write (`RW`) modes.
 
 - `/ro` switches to read-only mode and hides the built-in `edit` and `write` tools.
-- `/rw` restores only the write tools hidden by RO, preserving tools added by other extensions.
+- `/rw` enables registered `edit`/`write` tools, preserving tools added by other extensions. Calling it again repairs missing write tools.
 - `/mode` toggles between the two modes.
 - The current mode is shown immediately after the model name and thinking effort in a custom TUI footer, and is included in the model context.
 - The custom footer retains directory, branch, usage, context and other extension statuses. Other extensions that replace the footer may override this layout.
@@ -40,4 +40,12 @@ pi.events.emit("ro-rw-mode:get", query);
 
 `pi_light_subagent` captures this mode at launch. Existing children keep their captured mode. No third-party adapter, child extension injection, or subagent runtime is included here.
 
-Write tools hidden by RO are persisted with the mode. Switching back to RW merges those tools into the current active selection instead of restoring a stale whole-tool-list snapshot. Modes are restored from the current session branch. Current-mode guidance is supplied through the system prompt; obsolete plugin reminders are filtered from model context.
+Only the mode is persisted. At startup/reload, branch navigation and mode commands, RO removes edit/write, while RW merges available registered edit/write into the current selection. This also repairs legacy sessions with missing or empty hiddenWrites. No historical hidden-tool snapshot is needed. Other extension tools remain unchanged. Tools absent from Pi's registry (for example because of CLI exclusions) are not enabled. RW intentionally enables registered write tools even if they were inactive. Current-mode guidance is supplied through the system prompt; obsolete plugin reminders are filtered from model context.
+
+## Tests
+
+```sh
+PI_NODE_MODULES=/path/to/pi/runtime/node_modules node --test test/mode.test.mjs
+```
+
+Regression coverage includes legacy/empty hiddenWrites, RO reload, RW repair, branch navigation, preserving extension tools and respecting the available registry.
