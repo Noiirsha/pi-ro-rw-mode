@@ -15,7 +15,8 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
   const setStatus = (ctx: ExtensionContext) => {
     const label = mode === "ro" ? " RO " : " RW ";
     const color = mode === "ro" ? "warning" : "success";
-    ctx.ui.setStatus("ro-rw-mode", ctx.ui.theme.inverse(ctx.ui.theme.bg(color, label)));
+    // Invert a foreground color to use it as the badge's filled background.
+    ctx.ui.setStatus("ro-rw-mode", ctx.ui.theme.inverse(ctx.ui.theme.fg(color, label)));
   };
 
   const persist = () => pi.appendEntry<PersistedState>(STATE_ENTRY, { mode });
