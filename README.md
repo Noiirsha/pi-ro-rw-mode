@@ -10,6 +10,8 @@ A small Pi coding-agent extension that provides read-only (`RO`) and read/write 
 
 This extension intentionally uses tool visibility and prompt guidance. It does not sandbox arbitrary shell commands.
 
+Footer usage labels: `UP` (input tokens), `DN` (output tokens), `CR` (cache read), `CW` (cache write), `HIT` (latest response's cache read / total prompt tokens), `COST` (total USD cost), and `CTX` (context usage / capacity). Zero usage counters are omitted.
+
 ## Install
 
 Copy `index.ts` into `~/.pi/agent/extensions/`:

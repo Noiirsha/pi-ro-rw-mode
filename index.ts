@@ -38,11 +38,16 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
           if (name) cwd += ` • ${name}`;
 
           const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+          let cacheHitRate: number | undefined;
           for (const entry of ctx.sessionManager.getEntries()) {
             const usage = entry.type === "message" && (entry.message.role === "assistant" || entry.message.role === "toolResult")
               ? entry.message.usage
               : "usage" in entry ? entry.usage : undefined;
             if (!usage) continue;
+            if (entry.type === "message" && entry.message.role === "assistant") {
+              const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+              cacheHitRate = promptTokens > 0 ? usage.cacheRead / promptTokens * 100 : undefined;
+            }
             totals.input += usage.input;
             totals.output += usage.output;
             totals.cacheRead += usage.cacheRead;
@@ -50,12 +55,13 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
             totals.cost += usage.cost.total;
           }
           const stats: string[] = [];
-          for (const [key, prefix] of [["input", "↑"], ["output", "↓"], ["cacheRead", "R"], ["cacheWrite", "W"]] as const) {
-            if (totals[key]) stats.push(`${prefix}${format(totals[key])}`);
+          for (const [key, prefix] of [["input", "UP"], ["output", "DN"], ["cacheRead", "CR"], ["cacheWrite", "CW"]] as const) {
+            if (totals[key]) stats.push(`${prefix}: ${format(totals[key])}`);
           }
-          if (totals.cost) stats.push(`$${totals.cost.toFixed(3)}`);
+          if (cacheHitRate !== undefined && (totals.cacheRead || totals.cacheWrite)) stats.push(`HIT: ${cacheHitRate.toFixed(1)}%`);
+          if (totals.cost) stats.push(`COST: $${totals.cost.toFixed(3)}`);
           const context = ctx.getContextUsage();
-          stats.push(`${context?.percent == null ? "?" : context.percent.toFixed(1) + "%"}/${format(context?.contextWindow ?? ctx.model?.contextWindow ?? 0)}`);
+          stats.push(`CTX: ${context?.percent == null ? "?" : context.percent.toFixed(1) + "%"}/${format(context?.contextWindow ?? ctx.model?.contextWindow ?? 0)}`);
 
           const effort = ctx.model?.reasoning ? ` · ${pi.getThinkingLevel()}` : "";
           const badge = theme.inverse(theme.fg(mode === "ro" ? "warning" : "success", mode === "ro" ? " RO " : " RW "));
