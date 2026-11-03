@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { loadSubagentAPI, registerChildMode } from "./src/subagents.ts";
 
 const WRITE_TOOLS = new Set(["edit", "write"]);
 const STATE_ENTRY = "ro-rw-mode-state";
@@ -11,9 +12,18 @@ interface PersistedState {
 }
 
 export default function roRwModeExtension(pi: ExtensionAPI): void {
+  if (process.env.PI_SUBAGENT_CHILD === "1") return;
   let mode: Mode = "rw";
   let toolsBeforeRo: string[] | undefined;
   let requestFooterRender: (() => void) | undefined;
+  let subagentAPI: Awaited<ReturnType<typeof loadSubagentAPI>>;
+  let childModeRegistration: { dispose(): void } | undefined;
+
+  const syncChildMode = (ctx: ExtensionContext) => {
+    childModeRegistration?.dispose();
+    childModeRegistration = undefined;
+    if (subagentAPI) childModeRegistration = registerChildMode(subagentAPI, ctx.sessionManager.getSessionId(), mode);
+  };
 
   const setStatus = (ctx: ExtensionContext) => {
     ctx.ui.setStatus("ro-rw-mode", undefined);
@@ -97,6 +107,7 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
     }
 
     mode = nextMode;
+    syncChildMode(ctx);
     setStatus(ctx);
     persist();
 
@@ -133,14 +144,13 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
     handler: toggle,
   });
 
-  pi.on("before_agent_start", async (event) => {
-    if (event.messageType !== "user") return;
+  pi.on("before_agent_start", async () => {
     return {
       message: {
         customType: "ro-rw-mode-context",
         content:
           mode === "ro"
-            ? "[RO MODE ACTIVE] You are in read-only mode. Do not use edit or write tools, and do not modify files. Perform only read-only inspection and analysis. If a change is needed, ask the user to switch to RW mode."
+            ? "[RO MODE ACTIVE] You are in read-only mode. Do not use edit or write tools, and do not modify files or other state through bash or scripts. Perform only read-only inspection and analysis. If a change is needed, ask the user to switch to RW mode."
             : "[RW MODE ACTIVE] You are in read/write mode. Use the available tools as needed to complete the user's request.",
         display: false,
       },
@@ -148,6 +158,10 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    // Background children can discover ambient extensions. Their dedicated child
+    // extension owns the launch snapshot; never restore a parent's UI/state here.
+    if (process.env.PI_SUBAGENT_CHILD === "1") return;
+    subagentAPI = await loadSubagentAPI();
     installFooter(ctx);
     const entries = ctx.sessionManager.getEntries();
     const saved = [...entries]
@@ -161,5 +175,11 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
       pi.setActiveTools(toolsBeforeRo.filter((name) => !WRITE_TOOLS.has(name)));
     }
     setStatus(ctx);
+    syncChildMode(ctx);
+  });
+
+  pi.on("session_shutdown", () => {
+    childModeRegistration?.dispose();
+    childModeRegistration = undefined;
   });
 }

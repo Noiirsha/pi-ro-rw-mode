@@ -1,0 +1,7 @@
+{
+  "name": "pi-ro-rw-mode",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "pi": { "extensions": ["./index.ts"] }
+}
