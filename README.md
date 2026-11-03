@@ -5,7 +5,8 @@ A small Pi coding-agent extension that provides read-only (`RO`) and read/write 
 - `/ro` switches to read-only mode and hides the built-in `edit` and `write` tools.
 - `/rw` restores the tool set that was active before entering RO mode.
 - `/mode` toggles between the two modes.
-- The current mode is shown in the TUI status area and is included in the model context.
+- The current mode is shown immediately after the model name and thinking effort in a custom TUI footer, and is included in the model context.
+- The custom footer retains directory, branch, usage, context and other extension statuses. Other extensions that replace the footer may override this layout.
 
 This extension intentionally uses tool visibility and prompt guidance. It does not sandbox arbitrary shell commands.
 

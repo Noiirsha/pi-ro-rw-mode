@@ -1,4 +1,6 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { homedir } from "node:os";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const WRITE_TOOLS = new Set(["edit", "write"]);
 const STATE_ENTRY = "ro-rw-mode-state";
@@ -11,12 +13,65 @@ interface PersistedState {
 export default function roRwModeExtension(pi: ExtensionAPI): void {
   let mode: Mode = "rw";
   let toolsBeforeRo: string[] | undefined;
+  let requestFooterRender: (() => void) | undefined;
 
   const setStatus = (ctx: ExtensionContext) => {
-    const label = mode === "ro" ? " RO " : " RW ";
-    const color = mode === "ro" ? "warning" : "success";
-    // Invert a foreground color to use it as the badge's filled background.
-    ctx.ui.setStatus("ro-rw-mode", ctx.ui.theme.inverse(ctx.ui.theme.fg(color, label)));
+    ctx.ui.setStatus("ro-rw-mode", undefined);
+    requestFooterRender?.();
+  };
+
+  const installFooter = (ctx: ExtensionContext) => {
+    ctx.ui.setFooter((tui, theme, footerData) => {
+      requestFooterRender = () => tui.requestRender();
+      const unsubscribe = footerData.onBranchChange(requestFooterRender);
+      const format = (n: number) => n < 1000 ? String(n) : n < 1e6 ? `${(n / 1000).toFixed(1)}k` : `${(n / 1e6).toFixed(1)}M`;
+      return {
+        invalidate() {},
+        dispose() { unsubscribe(); requestFooterRender = undefined; },
+        render(width: number): string[] {
+          if (width <= 0) return [];
+          const home = homedir();
+          let cwd = ctx.cwd === home ? "~" : ctx.cwd.startsWith(`${home}/`) ? `~${ctx.cwd.slice(home.length)}` : ctx.cwd;
+          const branch = footerData.getGitBranch();
+          if (branch) cwd += ` (${branch})`;
+          const name = ctx.sessionManager.getSessionName();
+          if (name) cwd += ` • ${name}`;
+
+          const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+          for (const entry of ctx.sessionManager.getEntries()) {
+            const usage = entry.type === "message" && (entry.message.role === "assistant" || entry.message.role === "toolResult")
+              ? entry.message.usage
+              : "usage" in entry ? entry.usage : undefined;
+            if (!usage) continue;
+            totals.input += usage.input;
+            totals.output += usage.output;
+            totals.cacheRead += usage.cacheRead;
+            totals.cacheWrite += usage.cacheWrite;
+            totals.cost += usage.cost.total;
+          }
+          const stats: string[] = [];
+          for (const [key, prefix] of [["input", "↑"], ["output", "↓"], ["cacheRead", "R"], ["cacheWrite", "W"]] as const) {
+            if (totals[key]) stats.push(`${prefix}${format(totals[key])}`);
+          }
+          if (totals.cost) stats.push(`$${totals.cost.toFixed(3)}`);
+          const context = ctx.getContextUsage();
+          stats.push(`${context?.percent == null ? "?" : context.percent.toFixed(1) + "%"}/${format(context?.contextWindow ?? ctx.model?.contextWindow ?? 0)}`);
+
+          const effort = ctx.model?.reasoning ? ` · ${pi.getThinkingLevel()}` : "";
+          const badge = theme.inverse(theme.fg(mode === "ro" ? "warning" : "success", mode === "ro" ? " RO " : " RW "));
+          // Reserve space for the badge even in narrow terminals.
+          const badgeWidth = visibleWidth(badge);
+          if (width <= badgeWidth + 1) return [truncateToWidth(badge, width, "")];
+          const model = truncateToWidth(ctx.model?.id ?? "no-model", Math.max(0, width - badgeWidth - visibleWidth(effort) - 1), "");
+          const right = truncateToWidth(theme.fg("dim", model + effort), width - badgeWidth - 1, "") + " " + badge;
+          const left = truncateToWidth(theme.fg("dim", stats.join(" ")), Math.max(0, width - visibleWidth(right) - 2), "");
+          const lines = [truncateToWidth(theme.fg("dim", cwd), width), left + " ".repeat(Math.max(0, width - visibleWidth(left) - visibleWidth(right))) + right];
+          const statuses = [...footerData.getExtensionStatuses()].filter(([key]) => key !== "ro-rw-mode").sort(([a], [b]) => a.localeCompare(b)).map(([, text]) => text.replace(/[\r\n\t]/g, " "));
+          if (statuses.length) lines.push(truncateToWidth(statuses.join(" "), width));
+          return lines;
+        },
+      };
+    });
   };
 
   const persist = () => pi.appendEntry<PersistedState>(STATE_ENTRY, { mode });
@@ -87,6 +142,7 @@ export default function roRwModeExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    installFooter(ctx);
     const entries = ctx.sessionManager.getEntries();
     const saved = [...entries]
       .reverse()
